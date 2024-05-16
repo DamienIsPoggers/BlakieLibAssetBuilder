@@ -1,0 +1,1 @@
+BlakieLibAssetBuilder.exe -dparc "%~f1" "%~f1".dparc
