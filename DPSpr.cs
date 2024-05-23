@@ -5,13 +5,13 @@ using System.Collections.Generic;
 using System.IO;
 using System;
 using System.Linq;
-using static System.Net.Mime.MediaTypeNames;
+using ZLibDotNet;
 
 namespace BlakieLibAssetBuilder
 {
     internal class DPSpr
     {
-        public static void CreateDPSPR(string inPath, string outPath)
+        public static void CreateDPSPR(string inPath, string outPath, bool rleCompress = false)
         {
             List<Color[]> paletteData = new List<Color[]>();
             List<ImageHeaderDat> images = new List<ImageHeaderDat>();
@@ -44,7 +44,7 @@ namespace BlakieLibAssetBuilder
                     if (hasTransparency)
                         paletteAlpha = ((PngChunkTRNS)png.GetChunksList().GetById1("TRNS")).GetPalletteAlpha();
                     Color[] pal = new Color[plte.GetNentries()];
-                    for(int i = 0; i < pal.Length; i++)
+                    for (int i = 0; i < pal.Length; i++)
                     {
                         int colorRaw = plte.GetEntry(i);
                         byte r = (byte)((colorRaw & 0xff0000) >> 16);
@@ -60,8 +60,8 @@ namespace BlakieLibAssetBuilder
                         {
                             alreadyHasPal = true;
                             break;
-                        }    
-                    if(alreadyHasPal)
+                        }
+                    if (alreadyHasPal)
                     {
                         byte palNum = 0;
                         for (byte i = 0; i < paletteData.Count; i++)
@@ -88,9 +88,24 @@ namespace BlakieLibAssetBuilder
                             texDat.AddRange(BitConverter.GetBytes(color));
                 }
 
-                byte[] tex = RLECompress(texDat, headerDat.indexed);
-                headerDat.compressedSize = tex.Length;
-                imageData.AddRange(tex);
+                Console.WriteLine("Compressing " + headerDat.spriteName);
+                if (rleCompress)
+                {
+                    byte[] tex = RLECompress(texDat, headerDat.indexed);
+                    headerDat.compressedSize = tex.Length;
+                    imageData.AddRange(tex);
+                }
+                else
+                {
+                    ZLib zlib = new ZLib();
+                    Span<byte> compressedData = new byte[zlib.CompressBound((uint)texDat.Count)];
+                    int compressedSize;
+                    zlib.Compress(compressedData, out compressedSize, texDat.ToArray(), ZLib.Z_BEST_COMPRESSION);
+                    byte[] dat = new byte[compressedSize];
+                    Array.Copy(compressedData.ToArray(), dat, compressedSize);
+                    imageData.AddRange(dat);
+                    headerDat.compressedSize = compressedSize;
+                }
                 images.Add(headerDat);
                 binReader.Close();
                 binReader.Dispose();
@@ -101,7 +116,7 @@ namespace BlakieLibAssetBuilder
             file.Write(Encoding.ASCII.GetBytes("DPSpr"));
             file.Write(BitConverter.GetBytes(images.Count));
             file.Write(BitConverter.GetBytes(paletteData.Count));
-            file.Write((byte)1); //compressed flag. uncompressed takes way to much space holy shit
+            file.Write(rleCompress ? (byte)1 : (byte)2); //compressed flag. uncompressed takes way to much space holy shit
             //Write palette data
             for (int i = 0; i < paletteData.Count; i++)
             {
@@ -112,7 +127,7 @@ namespace BlakieLibAssetBuilder
                         file.Write(0);
             }
             //write image data
-            foreach(ImageHeaderDat header in images)
+            foreach (ImageHeaderDat header in images)
                 file.Write(header.GetAsBytes());
 
             //write texture data
@@ -138,7 +153,7 @@ namespace BlakieLibAssetBuilder
             {
                 int curPixel, prevPixel;
                 bool writeBuffer = false;
-                if(indexed)
+                if (indexed)
                 {
                     curPixel = data[i];
                     prevPixel = data[i - 1];
@@ -172,7 +187,7 @@ namespace BlakieLibAssetBuilder
                 if (i + 1 == pixelCount)
                     writeBuffer = true;
 
-                if(writeBuffer)
+                if (writeBuffer)
                 {
                     if (inRandom)
                     {
@@ -261,7 +276,7 @@ namespace BlakieLibAssetBuilder
             public byte palNum;
             public int width;
             public int height;
-            public int compressedSize;
+            public int compressedSize; //if zlib compressed this is uncompressed size
 
             public byte[] GetAsBytes()
             {
